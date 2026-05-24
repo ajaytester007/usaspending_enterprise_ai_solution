@@ -1,0 +1,23 @@
+{
+  "product": "USAspending State Quarter Federal Project Spend",
+  "layers": {
+    "bronze": "Raw API JSON preserving source payloads and request metadata",
+    "silver": "Normalized state-quarter spend records",
+    "gold": "Aggregated dashboard-ready views"
+  },
+  "entities": [
+    "DimState",
+    "DimTimeQuarter",
+    "FactFederalSpendQuarter",
+    "FactRefreshRun",
+    "DimConnector",
+    "DimAwardType"
+  ],
+  "quality_rules": [
+    "state must be valid USPS two-letter abbreviation",
+    "year must be numeric",
+    "quarter must be Q1-Q4",
+    "total_obligations must not be null",
+    "raw payload file must be traceable from each silver record"
+  ]
+}

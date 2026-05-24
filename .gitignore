@@ -1,0 +1,32 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/bronze/**/*.json
+data/silver/**/*.parquet
+data/gold/**/*.parquet
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+.venv/
+
+# VS Code / Visual Studio
+.vs/
+.vscode/
+
+# Spark temp
+SparkTemp/
+spark-warehouse/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data outputs
+data/silver/
+data/gold/
+
+# Jupyter
+.ipynb_checkpoints/

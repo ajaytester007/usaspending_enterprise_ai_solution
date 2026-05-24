@@ -1,0 +1,6 @@
+{% extends 'base.html' %}{% block content %}
+<h1>Enterprise Federal Spend Dashboard</h1>
+<p>Run the local pipeline, then explore state-quarter federal obligations with interactive charts, metadata, workflow design, and AI/RAG scaffolding.</p>
+<div class="row"><div class="col-md-4"><div class="card"><div class="card-body"><h5>Medallion Layers</h5><p>Bronze raw API JSON → Silver normalized facts → Gold dashboard marts.</p></div></div></div><div class="col-md-4"><div class="card"><div class="card-body"><h5>PySpark + SparkSQL</h5><p>Distributed-ready transformations with Spark DataFrames and SQL views.</p></div></div></div><div class="col-md-4"><div class="card"><div class="card-body"><h5>Agentic AI</h5><p>RAG and MCP extension points for enterprise workflows.</p></div></div></div></div>
+<a class="btn btn-primary" href="/charts">Open Interactive Charts</a>
+{% endblock %}

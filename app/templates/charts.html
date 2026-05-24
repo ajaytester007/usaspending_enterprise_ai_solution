@@ -1,0 +1,4 @@
+{% extends 'base.html' %}{% block content %}
+<h2>Interactive Reports and Drill-Down</h2>
+<div>{{ chart1|safe }}</div><hr><div>{{ chart2|safe }}</div><h3>Drill-Down Records</h3>{{ table|safe }}
+{% endblock %}
