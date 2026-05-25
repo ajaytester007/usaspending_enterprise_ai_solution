@@ -1,8 +1,32 @@
 # USAspending Enterprise AI Data Product
 
+Enterprise-style open-data analytics platform for USAspending federal project spend by U.S. state and quarter.
+
 Flask + PySpark/SparkSQL + Medallion Architecture + metadata-driven public API ingestion + interactive dashboards + RAG/agent scaffolding.
 
 Primary public source: USAspending.gov API. API endpoints currently do not require authorization and are public DATA Act spending data.
+
+## Capabilities
+
+- USAspending API ingestion
+- Bronze, Silver, Gold Medallion Architecture
+- PySpark and SparkSQL transformations
+- Local Flask dashboard
+- Interactive charts and drill-down views
+- Metadata-driven connector structure
+- Agentic AI / RAG / MCP extension scaffolding
+- GitHub Actions CI-ready structure
+- Databricks migration-ready Lakehouse design
+
+## Architecture
+
+```text
+USAspending API
+  -> Bronze JSON Landing
+  -> Silver Canonical State-Quarter Dataset
+  -> Gold Aggregates
+  -> Flask Dashboard / Charts / Reports
+  -> Future: Delta Lake + Databricks SQL Dashboards
 
 ## Quick Start - Windows PowerShell
 
