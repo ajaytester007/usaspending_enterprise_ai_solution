@@ -1,13 +1,12 @@
-@'
 name: Python CI
 
 on:
   push:
-    branches: [ main ]
-
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
-
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -15,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -36,4 +34,3 @@ jobs:
       - name: Run tests
         run: |
           pytest -q
-'@ | Set-Content .github\workflows\ci.yml
