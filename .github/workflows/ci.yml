@@ -34,3 +34,6 @@ jobs:
       - name: Run tests
         run: |
           pytest -q
+
+      - name: Smoke Tests
+        run: pytest tests/local -v
