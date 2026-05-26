@@ -1,0 +1,121 @@
+@'
+name: Databricks Integration Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feature/us-country-geo-foundation
+
+jobs:
+  databricks-tests:
+    runs-on: ubuntu-latest
+
+    env:
+      DATABRICKS_HOST: https://dbc-d06cf8b0-4987.cloud.databricks.com
+      DATABRICKS_TOKEN: TopSecret
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Validate Databricks auth
+        run: databricks current-user me
+
+      - name: Import Databricks test notebooks
+        run: |
+          databricks workspace mkdirs /Workspace/Users/${{ github.actor }}/usaspending_tests
+          databricks workspace import tests/databricks/notebooks/integration_quality_checks.py /Workspace/Users/${{ github.actor }}/usaspending_tests/integration_quality_checks --language PYTHON --overwrite
+          databricks workspace import tests/databricks/notebooks/observability_tests.py /Workspace/Users/${{ github.actor }}/usaspending_tests/observability_tests --language PYTHON --overwrite
+          databricks workspace import tests/databricks/notebooks/dashboard_dataset_tests.py /Workspace/Users/${{ github.actor }}/usaspending_tests/dashboard_dataset_tests --language PYTHON --overwrite
+          databricks workspace import tests/databricks/notebooks/geo_readiness_tests.py /Workspace/Users/${{ github.actor }}/usaspending_tests/geo_readiness_tests --language PYTHON --overwrite
+
+      - name: Run Databricks integration test job
+        run: |
+          databricks jobs create --json '{
+            "name": "usaspending-ci-integration-tests",
+            "tasks": [
+              {
+                "task_key": "integration_quality_checks",
+                "notebook_task": {
+                  "notebook_path": "/Workspace/Users/${{ github.actor }}/usaspending_tests/integration_quality_checks"
+                },
+                "new_cluster": {
+                  "spark_version": "15.4.x-scala2.12",
+                  "node_type_id": "i3.xlarge",
+                  "num_workers": 1
+                }
+              },
+              {
+                "task_key": "observability_tests",
+                "depends_on": [{"task_key": "integration_quality_checks"}],
+                "notebook_task": {
+                  "notebook_path": "/Workspace/Users/${{ github.actor }}/usaspending_tests/observability_tests"
+                },
+                "new_cluster": {
+                  "spark_version": "15.4.x-scala2.12",
+                  "node_type_id": "i3.xlarge",
+                  "num_workers": 1
+                }
+              },
+              {
+                "task_key": "dashboard_dataset_tests",
+                "depends_on": [{"task_key": "observability_tests"}],
+                "notebook_task": {
+                  "notebook_path": "/Workspace/Users/${{ github.actor }}/usaspending_tests/dashboard_dataset_tests"
+                },
+                "new_cluster": {
+                  "spark_version": "15.4.x-scala2.12",
+                  "node_type_id": "i3.xlarge",
+                  "num_workers": 1
+                }
+              },
+              {
+                "task_key": "geo_readiness_tests",
+                "depends_on": [{"task_key": "dashboard_dataset_tests"}],
+                "notebook_task": {
+                  "notebook_path": "/Workspace/Users/${{ github.actor }}/usaspending_tests/geo_readiness_tests"
+                },
+                "new_cluster": {
+                  "spark_version": "15.4.x-scala2.12",
+                  "node_type_id": "i3.xlarge",
+                  "num_workers": 1
+                }
+              }
+            ]
+          }' > job_create_output.json
+
+          JOB_ID=$(python -c "import json; print(json.load(open('job_create_output.json'))['job_id'])")
+          databricks jobs run-now "$JOB_ID" --no-wait > run_output.json
+          RUN_ID=$(python -c "import json; print(json.load(open('run_output.json'))['run_id'])")
+
+          echo "Databricks run id: $RUN_ID"
+
+          while true; do
+            databricks runs get "$RUN_ID" > run_status.json
+            LIFE_CYCLE=$(python -c "import json; print(json.load(open('run_status.json'))['state'].get('life_cycle_state'))")
+            RESULT=$(python -c "import json; print(json.load(open('run_status.json'))['state'].get('result_state'))")
+
+            echo "Lifecycle: $LIFE_CYCLE Result: $RESULT"
+
+            if [ "$LIFE_CYCLE" = "TERMINATED" ]; then
+              if [ "$RESULT" = "SUCCESS" ]; then
+                echo "Databricks integration tests passed."
+                exit 0
+              else
+                echo "Databricks integration tests failed."
+                exit 1
+              fi
+            fi
+
+            if [ "$LIFE_CYCLE" = "INTERNAL_ERROR" ] || [ "$LIFE_CYCLE" = "SKIPPED" ]; then
+              exit 1
+            fi
+
+            sleep 30
+          done
+'@ | Set-Content .github\workflows\databricks-integration-tests.yml
