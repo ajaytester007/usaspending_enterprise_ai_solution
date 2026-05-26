@@ -1,19 +1,10 @@
 # Databricks notebook source
-spark.sql("DROP TABLE IF EXISTS default.usaspending_state_quarter_silver")
-spark.sql("DROP TABLE IF EXISTS default.usaspending_state_quarter_gold")
-spark.sql("DROP TABLE IF EXISTS default.usaspending_state_year_gold")
-
-# COMMAND ----------
-
 # =========================================================
 # USAspending Enterprise Medallion Config
 # =========================================================
 
-country = "USA"
-country_code = "US"
-geo_level = "state"
-
 states = ["PA", "NJ", "NY", "CA", "TX", "FL"]
+
 years = [2024, 2025, 2026]
 
 quarters = {
@@ -24,9 +15,22 @@ quarters = {
 }
 
 pipeline_name = "usaspending_medallion_databricks"
+
 source_system = "USAspending API"
+
 refresh_mode = "FULL"
+
 environment = "DEV"
+
+# COMMAND ----------
+
+expected_states = ["PA","NJ","NY","CA","TX","FL"]
+
+invalid_states = silver_df.filter(
+    ~F.col("state").isin(expected_states)
+)
+
+display(invalid_states)
 
 # COMMAND ----------
 
@@ -66,13 +70,6 @@ for year in years:
 import time
 
 rows = []
-
-quarters = {
-    "Q1": ("01-01", "03-31"),
-    "Q2": ("04-01", "06-30"),
-    "Q3": ("07-01", "09-30"),
-    "Q4": ("10-01", "12-31"),
-}
 
 for year in years:
     for quarter, dates in quarters.items():
@@ -129,46 +126,27 @@ for year in years:
             )
 
             rows.append({
-                "country": country,
-                "country_code": country_code,
-                "geo_level": geo_level,
                 "state": state,
                 "year": year,
                 "quarter": quarter,
                 "period": f"{year}-{quarter}",
                 "total_obligations": total,
-                "transaction_count": count,
-                "source_system": source_system
+                "transaction_count": count
             })
 
 silver_df = spark.createDataFrame(pd.DataFrame(rows))
 
-silver_df.write.format("delta") \
-    .mode("overwrite") \
-    .option("overwriteSchema", "true") \
-    .saveAsTable("default.usaspending_state_quarter_silver")
+silver_df.write.format("delta").mode("overwrite").saveAsTable(
+    "default.usaspending_state_quarter_silver"
+)
 
 display(silver_df)
 
 # COMMAND ----------
 
-display(silver_df.select("country", "country_code", "geo_level", "state", "year", "quarter").limit(20))
-
-# COMMAND ----------
-
-expected_states = ["PA","NJ","NY","CA","TX","FL"]
-
-invalid_states = silver_df.filter(
-    ~F.col("state").isin(expected_states)
-)
-
-display(invalid_states)
-
-# COMMAND ----------
-
 gold_quarter = (
     silver_df
-    .groupBy("country", "country_code", "geo_level", "state", "year", "quarter", "period")
+    .groupBy("state", "year", "quarter", "period")
     .agg(
         F.sum("total_obligations").alias("total_obligations"),
         F.sum("transaction_count").alias("transaction_count")
@@ -177,7 +155,7 @@ gold_quarter = (
 
 gold_year = (
     silver_df
-    .groupBy("country", "country_code", "geo_level", "state", "year")
+    .groupBy("state", "year")
     .agg(
         F.sum("total_obligations").alias("total_obligations"),
         F.sum("transaction_count").alias("transaction_count"),
@@ -185,18 +163,12 @@ gold_year = (
     )
 )
 
-gold_quarter.write.format("delta") \
-    .mode("overwrite") \
-    .option("overwriteSchema", "true") \
-    .saveAsTable(
-        "default.usaspending_state_quarter_gold"
+gold_quarter.write.format("delta").mode("overwrite").saveAsTable(
+    "default.usaspending_state_quarter_gold"
 )
 
-gold_year.write.format("delta") \
-    .mode("overwrite") \
-    .option("overwriteSchema", "true") \
-    .saveAsTable(
-        "default.usaspending_state_year_gold"
+gold_year.write.format("delta").mode("overwrite").saveAsTable(
+    "default.usaspending_state_year_gold"
 )
 
 display(gold_quarter)
@@ -204,51 +176,40 @@ display(gold_quarter)
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC SELECT DISTINCT country, country_code, geo_level, state
-# MAGIC FROM default.usaspending_state_quarter_gold
-# MAGIC ORDER BY country, geo_level, state;
-
-# COMMAND ----------
-
-from pyspark.sql import functions as F
-
-gold_quarter = (
-    silver_df
-    .groupBy("country", "country_code", "geo_level", "state", "year", "quarter", "period")
-    .agg(
-        F.sum("total_obligations").alias("total_obligations"),
-        F.sum("transaction_count").alias("transaction_count")
-    )
-)
-
-gold_year = (
-    silver_df
-    .groupBy("country", "country_code", "geo_level", "state", "year")
-    .agg(
-        F.sum("total_obligations").alias("total_obligations"),
-        F.sum("transaction_count").alias("transaction_count"),
-        F.countDistinct("quarter").alias("quarters_reported")
-    )
-)
-
-gold_quarter.write.format("delta") \
-    .mode("overwrite") \
-    .option("overwriteSchema", "true") \
-    .saveAsTable("default.usaspending_state_quarter_gold")
-
-gold_year.write.format("delta") \
-    .mode("overwrite") \
-    .option("overwriteSchema", "true") \
-    .saveAsTable("default.usaspending_state_year_gold")
-
-display(gold_quarter)
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC SELECT country, country_code, geo_level, state, year, quarter, period
+# MAGIC SELECT state, year, quarter, total_obligations
 # MAGIC FROM default.usaspending_state_quarter_gold
 # MAGIC ORDER BY year, quarter, state;
+
+# COMMAND ----------
+
+gold_quarter = (
+    silver_df
+    .groupBy("state", "year", "quarter", "period")
+    .agg(
+        F.sum("total_obligations").alias("total_obligations"),
+        F.sum("transaction_count").alias("transaction_count")
+    )
+)
+
+gold_year = (
+    silver_df
+    .groupBy("state", "year")
+    .agg(
+        F.sum("total_obligations").alias("total_obligations"),
+        F.sum("transaction_count").alias("transaction_count"),
+        F.countDistinct("quarter").alias("quarters_reported")
+    )
+)
+
+gold_quarter.write.format("delta").mode("overwrite").saveAsTable(
+    "default.usaspending_state_quarter_gold"
+)
+
+gold_year.write.format("delta").mode("overwrite").saveAsTable(
+    "default.usaspending_state_year_gold"
+)
+
+display(gold_quarter)
 
 # COMMAND ----------
 
@@ -335,16 +296,3 @@ display(observability_refresh)
 # MAGIC SELECT *
 # MAGIC FROM default.usaspending_observability_quality
 # MAGIC ORDER BY refresh_timestamp_utc DESC, metric_name;
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC SELECT country, country_code, geo_level, state, year, quarter, period
-# MAGIC FROM default.usaspending_state_quarter_gold
-# MAGIC ORDER BY year, quarter, state;
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC SELECT *
-# MAGIC FROM default.usaspending_state_quarter_gold

@@ -29,12 +29,188 @@
       "queryLines": [
         "SELECT * FROM default.usaspending_observability_quality"
       ]
+    },
+    {
+      "name": "geo_readiness_summary",
+      "displayName": "geo_readiness_summary",
+      "queryLines": [
+        "SELECT\n",
+        "  country,\n",
+        "  country_code,\n",
+        "  geo_level,\n",
+        "  COUNT(DISTINCT state) AS geography_count,\n",
+        "  COUNT(DISTINCT period) AS period_count,\n",
+        "  SUM(total_obligations) AS total_obligations,\n",
+        "  SUM(transaction_count) AS transaction_count\n",
+        "FROM\n",
+        "  default.usaspending_state_quarter_gold\n",
+        "GROUP BY\n",
+        "  country,\n",
+        "  country_code,\n",
+        "  geo_level"
+      ],
+      "catalog": "workspace",
+      "schema": "default"
+    },
+    {
+      "name": "state_performance_ranking",
+      "displayName": "state_performance_ranking",
+      "queryLines": [
+        "WITH state_totals AS (\n",
+        "  SELECT\n",
+        "    state,\n",
+        "    SUM(total_obligations) AS total_obligations,\n",
+        "    SUM(transaction_count) AS transaction_count,\n",
+        "    TRY_DIVIDE(SUM(total_obligations), SUM(transaction_count)) AS avg_transaction_size\n",
+        "  FROM\n",
+        "    usaspending_state_quarter_gold\n",
+        "  GROUP BY\n",
+        "    state\n",
+        "),\n",
+        "total_spending AS (\n",
+        "  SELECT\n",
+        "    SUM(total_obligations) AS grand_total\n",
+        "  FROM\n",
+        "    state_totals\n",
+        ")\n",
+        "SELECT\n",
+        "  ROW_NUMBER() OVER (ORDER BY st.total_obligations DESC) AS rank,\n",
+        "  st.state,\n",
+        "  st.total_obligations,\n",
+        "  st.transaction_count,\n",
+        "  st.avg_transaction_size,\n",
+        "  (st.total_obligations / t.grand_total) * 100 AS pct_of_total,\n",
+        "  SUM(st.total_obligations) OVER (\n",
+        "      ORDER BY st.total_obligations DESC\n",
+        "      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n",
+        "    )\n",
+        "    / t.grand_total\n",
+        "    * 100 AS cumulative_pct\n",
+        "FROM\n",
+        "  state_totals st CROSS JOIN total_spending t\n",
+        "ORDER BY\n",
+        "  st.total_obligations DESC"
+      ]
+    },
+    {
+      "name": "top_10_states",
+      "displayName": "top_10_states",
+      "queryLines": [
+        "SELECT\n",
+        "  state,\n",
+        "  SUM(total_obligations) AS total_obligations,\n",
+        "  SUM(transaction_count) AS transaction_count\n",
+        "FROM\n",
+        "  usaspending_state_quarter_gold\n",
+        "GROUP BY\n",
+        "  state\n",
+        "ORDER BY\n",
+        "  total_obligations DESC\n",
+        "LIMIT 10"
+      ],
+      "catalog": "workspace",
+      "schema": "default"
+    },
+    {
+      "name": "spending_concentration",
+      "displayName": "spending_concentration",
+      "queryLines": [
+        "WITH ranked_states AS (\n",
+        "  SELECT\n",
+        "    state,\n",
+        "    SUM(total_obligations) AS total_obligations,\n",
+        "    ROW_NUMBER() OVER (ORDER BY SUM(total_obligations) DESC) AS rank\n",
+        "  FROM\n",
+        "    usaspending_state_quarter_gold\n",
+        "  GROUP BY\n",
+        "    state\n",
+        ")\n",
+        "SELECT\n",
+        "  CASE\n",
+        "    WHEN rank <= 5 THEN state\n",
+        "    ELSE 'Others'\n",
+        "  END AS state_group,\n",
+        "  SUM(total_obligations) AS total_obligations\n",
+        "FROM\n",
+        "  ranked_states\n",
+        "GROUP BY\n",
+        "  state_group"
+      ],
+      "catalog": "workspace",
+      "schema": "default"
+    },
+    {
+      "name": "yoy_growth",
+      "displayName": "yoy_growth",
+      "queryLines": [
+        "SELECT\n",
+        "  curr.state,\n",
+        "  curr.quarter,\n",
+        "  curr.year AS current_year,\n",
+        "  curr.total_obligations AS current_obligations,\n",
+        "  prev.total_obligations AS previous_obligations,\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      prev.total_obligations > 0\n",
+        "    THEN\n",
+        "      ((curr.total_obligations - prev.total_obligations) / prev.total_obligations) * 100\n",
+        "    ELSE NULL\n",
+        "  END AS yoy_growth_pct\n",
+        "FROM\n",
+        "  usaspending_state_quarter_gold curr\n",
+        "    LEFT JOIN usaspending_state_quarter_gold prev\n",
+        "      ON curr.state = prev.state\n",
+        "      AND curr.quarter = prev.quarter\n",
+        "      AND curr.year = prev.year + 1\n",
+        "WHERE\n",
+        "  prev.total_obligations IS NOT NULL"
+      ],
+      "catalog": "workspace",
+      "schema": "default"
+    },
+    {
+      "name": "qoq_growth",
+      "displayName": "qoq_growth",
+      "queryLines": [
+        "WITH ordered_quarters AS (\n",
+        "  SELECT\n",
+        "    state,\n",
+        "    period,\n",
+        "    year,\n",
+        "    quarter,\n",
+        "    total_obligations,\n",
+        "    LAG(total_obligations) OVER (\n",
+        "        PARTITION BY state\n",
+        "        ORDER BY year, quarter\n",
+        "      ) AS prev_quarter_obligations\n",
+        "  FROM\n",
+        "    usaspending_state_quarter_gold\n",
+        ")\n",
+        "SELECT\n",
+        "  state,\n",
+        "  period,\n",
+        "  year,\n",
+        "  quarter,\n",
+        "  total_obligations AS current_obligations,\n",
+        "  prev_quarter_obligations,\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      prev_quarter_obligations > 0\n",
+        "    THEN\n",
+        "      ((total_obligations - prev_quarter_obligations) / prev_quarter_obligations) * 100\n",
+        "    ELSE NULL\n",
+        "  END AS qoq_growth_pct\n",
+        "FROM\n",
+        "  ordered_quarters\n",
+        "WHERE\n",
+        "  prev_quarter_obligations IS NOT NULL"
+      ]
     }
   ],
   "pages": [
     {
       "name": "910d7532",
-      "displayName": "quarter_gold",
+      "displayName": "Quarterly Trends",
       "layout": [
         {
           "widget": {
@@ -97,9 +273,28 @@
           },
           "position": {
             "x": 0,
-            "y": 1,
+            "y": 0,
             "width": 12,
             "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "6ce0ba58",
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {},
+              "frame": {
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 11,
+            "width": 4,
+            "height": 1
           }
         }
       ],
@@ -108,7 +303,7 @@
     },
     {
       "name": "34cda9ce",
-      "displayName": "year_gold",
+      "displayName": "Geography Drilldown",
       "layout": [
         {
           "widget": {
@@ -119,6 +314,10 @@
                 "query": {
                   "datasetName": "432cfaed",
                   "fields": [
+                    {
+                      "name": "country",
+                      "expression": "`country`"
+                    },
                     {
                       "name": "state",
                       "expression": "`state`"
@@ -135,7 +334,7 @@
             "spec": {
               "version": 3,
               "frame": {
-                "title": "Total Federal Obligations by State",
+                "title": "Total Obligations by Geography",
                 "showTitle": true
               },
               "widgetType": "bar",
@@ -155,6 +354,12 @@
                   "scale": {
                     "type": "quantitative"
                   }
+                },
+                "color": {
+                  "fieldName": "country",
+                  "scale": {
+                    "type": "categorical"
+                  }
                 }
               }
             }
@@ -165,6 +370,97 @@
             "width": 6,
             "height": 6
           }
+        },
+        {
+          "widget": {
+            "name": "geo_readiness_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "geo_readiness_summary",
+                  "fields": [
+                    {
+                      "name": "country",
+                      "expression": "`country`"
+                    },
+                    {
+                      "name": "country_code",
+                      "expression": "`country_code`"
+                    },
+                    {
+                      "name": "geo_level",
+                      "expression": "`geo_level`"
+                    },
+                    {
+                      "name": "geography_count",
+                      "expression": "`geography_count`"
+                    },
+                    {
+                      "name": "period_count",
+                      "expression": "`period_count`"
+                    },
+                    {
+                      "name": "total_obligations",
+                      "expression": "`total_obligations`"
+                    },
+                    {
+                      "name": "transaction_count",
+                      "expression": "`transaction_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Geography Readiness Summary",
+                "showTitle": true
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "country"
+                  },
+                  {
+                    "fieldName": "country_code"
+                  },
+                  {
+                    "fieldName": "geo_level"
+                  },
+                  {
+                    "fieldName": "geography_count"
+                  },
+                  {
+                    "fieldName": "period_count"
+                  },
+                  {
+                    "fieldName": "total_obligations",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "compact"
+                    }
+                  },
+                  {
+                    "fieldName": "transaction_count",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 6
+          }
         }
       ],
       "pageType": "PAGE_TYPE_CANVAS",
@@ -172,7 +468,7 @@
     },
     {
       "name": "f00b94ce",
-      "displayName": "quarter_gold",
+      "displayName": "Data Quality",
       "layout": [
         {
           "widget": {
@@ -249,6 +545,61 @@
             "y": 2,
             "width": 6,
             "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "quality_metrics",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "390e737e",
+                  "fields": [
+                    {
+                      "name": "metric_name",
+                      "expression": "`metric_name`"
+                    },
+                    {
+                      "name": "metric_value",
+                      "expression": "`metric_value`"
+                    },
+                    {
+                      "name": "refresh_timestamp_utc",
+                      "expression": "`refresh_timestamp_utc`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Quality Metrics",
+                "showTitle": true
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "metric_name"
+                  },
+                  {
+                    "fieldName": "metric_value"
+                  },
+                  {
+                    "fieldName": "refresh_timestamp_utc"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 8
           }
         }
       ],
@@ -396,27 +747,23 @@
             "width": 4,
             "height": 2
           }
-        }
-      ],
-      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
-      "layoutVersion": "GRID_V1"
-    },
-    {
-      "name": "97b71760",
-      "displayName": "Dashboard_Widgets",
-      "layout": [
+        },
         {
           "widget": {
-            "name": "kpi_total_obligations",
+            "name": "country_filter",
             "queries": [
               {
-                "name": "main_query",
+                "name": "dashboards/01f157de0c6610d6bb2d2e5e6837e33e/datasets/01f1583b5ddc1624acf52ab826ad9710_country",
                 "query": {
                   "datasetName": "52f8d5c8",
                   "fields": [
                     {
-                      "name": "sum(total_obligations)",
-                      "expression": "SUM(`total_obligations`)"
+                      "name": "country",
+                      "expression": "`country`"
+                    },
+                    {
+                      "name": "country_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
                   "disaggregated": false
@@ -426,24 +773,127 @@
             "spec": {
               "version": 2,
               "frame": {
-                "title": "Total Federal Obligations",
+                "title": "Country",
                 "showTitle": true
               },
-              "widgetType": "counter",
+              "widgetType": "filter-multi-select",
               "encodings": {
-                "value": {
-                  "fieldName": "sum(total_obligations)"
-                }
+                "fields": [
+                  {
+                    "fieldName": "country",
+                    "queryName": "dashboards/01f157de0c6610d6bb2d2e5e6837e33e/datasets/01f1583b5ddc1624acf52ab826ad9710_country"
+                  }
+                ]
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 0,
-            "width": 12,
-            "height": 3
+            "y": 2,
+            "width": 4,
+            "height": 2
           }
         },
+        {
+          "widget": {
+            "name": "geo_level_filter",
+            "queries": [
+              {
+                "name": "dashboards/01f157de0c6610d6bb2d2e5e6837e33e/datasets/01f1583b5ddc1624acf52ab826ad9710_geo_level",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "geo_level",
+                      "expression": "`geo_level`"
+                    },
+                    {
+                      "name": "geo_level_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Geo Level",
+                "showTitle": true
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "geo_level",
+                    "queryName": "dashboards/01f157de0c6610d6bb2d2e5e6837e33e/datasets/01f1583b5ddc1624acf52ab826ad9710_geo_level"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "period_filter",
+            "queries": [
+              {
+                "name": "dashboards/01f157de0c6610d6bb2d2e5e6837e33e/datasets/01f1583b5ddc1624acf52ab826ad9710_period",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    },
+                    {
+                      "name": "period_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Period",
+                "showTitle": true
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "period",
+                    "queryName": "dashboards/01f157de0c6610d6bb2d2e5e6837e33e/datasets/01f1583b5ddc1624acf52ab826ad9710_period"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 2,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "97b71760",
+      "displayName": "Executive Overview",
+      "layout": [
         {
           "widget": {
             "name": "line_period_obligations",
@@ -576,6 +1026,14 @@
                   "datasetName": "52f8d5c8",
                   "fields": [
                     {
+                      "name": "country",
+                      "expression": "`country`"
+                    },
+                    {
+                      "name": "geo_level",
+                      "expression": "`geo_level`"
+                    },
+                    {
                       "name": "state",
                       "expression": "`state`"
                     },
@@ -594,6 +1052,10 @@
                     {
                       "name": "total_obligations",
                       "expression": "`total_obligations`"
+                    },
+                    {
+                      "name": "transaction_count",
+                      "expression": "`transaction_count`"
                     }
                   ],
                   "disaggregated": true
@@ -603,12 +1065,18 @@
             "spec": {
               "version": 2,
               "frame": {
-                "title": "Quarter Details",
+                "title": "State-Quarter Detail",
                 "showTitle": true
               },
               "widgetType": "table",
               "encodings": {
                 "columns": [
+                  {
+                    "fieldName": "country"
+                  },
+                  {
+                    "fieldName": "geo_level"
+                  },
                   {
                     "fieldName": "state"
                   },
@@ -627,6 +1095,13 @@
                       "type": "number-plain",
                       "abbreviation": "compact"
                     }
+                  },
+                  {
+                    "fieldName": "transaction_count",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none"
+                    }
                   }
                 ]
               }
@@ -641,7 +1116,210 @@
         },
         {
           "widget": {
-            "name": "table_refresh_log",
+            "name": "kpi_total_obligations",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "sum(total_obligations)",
+                      "expression": "SUM(`total_obligations`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Total Obligations",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_obligations)"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_transactions",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "sum(transaction_count)",
+                      "expression": "SUM(`transaction_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Transactions",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(transaction_count)"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_countries",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "countdistinct(country)",
+                      "expression": "COUNT(DISTINCT `country`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Countries",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(country)"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_states",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "countdistinct(state)",
+                      "expression": "COUNT(DISTINCT `state`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "States",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(state)"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_periods",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "countdistinct(period)",
+                      "expression": "COUNT(DISTINCT `period`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Periods",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(period)"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "observability",
+      "displayName": "Observability",
+      "layout": [
+        {
+          "widget": {
+            "name": "refresh_log",
             "queries": [
               {
                 "name": "main_query",
@@ -680,7 +1358,7 @@
             "spec": {
               "version": 2,
               "frame": {
-                "title": "Refresh Log",
+                "title": "Pipeline Refresh Log",
                 "showTitle": true
               },
               "widgetType": "table",
@@ -710,31 +1388,340 @@
           },
           "position": {
             "x": 0,
-            "y": 15,
+            "y": 0,
+            "width": 12,
+            "height": 8
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "advanced_analytics",
+      "displayName": "Advanced Analytics",
+      "layout": [
+        {
+          "widget": {
+            "name": "avg_transaction_size",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "sum(total_obligations)",
+                      "expression": "SUM(`total_obligations`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Average Transaction Size",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_obligations)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "top_10_states",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "top_10_states",
+                  "fields": [
+                    {
+                      "name": "state",
+                      "expression": "`state`"
+                    },
+                    {
+                      "name": "total_obligations",
+                      "expression": "`total_obligations`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Top 10 States by Obligations",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "state",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "total_obligations",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
             "width": 6,
             "height": 6
           }
         },
         {
           "widget": {
-            "name": "table_quality_metrics",
+            "name": "spending_concentration",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "390e737e",
+                  "datasetName": "spending_concentration",
                   "fields": [
                     {
-                      "name": "metric_name",
-                      "expression": "`metric_name`"
+                      "name": "total_obligations",
+                      "expression": "`total_obligations`"
                     },
                     {
-                      "name": "metric_value",
-                      "expression": "`metric_value`"
+                      "name": "state_group",
+                      "expression": "`state_group`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Spending Concentration",
+                "showTitle": true
+              },
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "total_obligations",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "state_group",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "yoy_growth",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "yoy_growth",
+                  "fields": [
+                    {
+                      "name": "state",
+                      "expression": "`state`"
                     },
                     {
-                      "name": "refresh_timestamp_utc",
-                      "expression": "`refresh_timestamp_utc`"
+                      "name": "current_year",
+                      "expression": "`current_year`"
+                    },
+                    {
+                      "name": "yoy_growth_pct",
+                      "expression": "`yoy_growth_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Year-over-Year Growth",
+                "showTitle": true
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "current_year",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "yoy_growth_pct",
+                  "format": {
+                    "type": "number-percent"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "state",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "qoq_growth",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "qoq_growth",
+                  "fields": [
+                    {
+                      "name": "state",
+                      "expression": "`state`"
+                    },
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    },
+                    {
+                      "name": "qoq_growth_pct",
+                      "expression": "`qoq_growth_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Quarter-over-Quarter Growth",
+                "showTitle": true
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "qoq_growth_pct",
+                  "format": {
+                    "type": "number-percent"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "state",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "state_ranking",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "state_performance_ranking",
+                  "fields": [
+                    {
+                      "name": "rank",
+                      "expression": "`rank`"
+                    },
+                    {
+                      "name": "state",
+                      "expression": "`state`"
+                    },
+                    {
+                      "name": "total_obligations",
+                      "expression": "`total_obligations`"
+                    },
+                    {
+                      "name": "transaction_count",
+                      "expression": "`transaction_count`"
+                    },
+                    {
+                      "name": "avg_transaction_size",
+                      "expression": "`avg_transaction_size`"
+                    },
+                    {
+                      "name": "pct_of_total",
+                      "expression": "`pct_of_total`"
+                    },
+                    {
+                      "name": "cumulative_pct",
+                      "expression": "`cumulative_pct`"
                     }
                   ],
                   "disaggregated": true
@@ -744,29 +1731,310 @@
             "spec": {
               "version": 2,
               "frame": {
-                "title": "Quality Metrics",
+                "title": "State Performance Ranking",
                 "showTitle": true
               },
               "widgetType": "table",
               "encodings": {
                 "columns": [
                   {
-                    "fieldName": "metric_name"
+                    "fieldName": "rank"
                   },
                   {
-                    "fieldName": "metric_value"
+                    "fieldName": "state"
                   },
                   {
-                    "fieldName": "refresh_timestamp_utc"
+                    "fieldName": "total_obligations",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "compact"
+                    }
+                  },
+                  {
+                    "fieldName": "transaction_count",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none"
+                    }
+                  },
+                  {
+                    "fieldName": "avg_transaction_size",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "compact"
+                    }
+                  },
+                  {
+                    "fieldName": "pct_of_total",
+                    "format": {
+                      "type": "number-percent"
+                    }
+                  },
+                  {
+                    "fieldName": "cumulative_pct",
+                    "format": {
+                      "type": "number-percent"
+                    }
                   }
                 ]
               }
             }
           },
           "position": {
-            "x": 6,
-            "y": 15,
+            "x": 0,
+            "y": 21,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "obligations_heatmap",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "state",
+                      "expression": "`state`"
+                    },
+                    {
+                      "name": "quarter",
+                      "expression": "`quarter`"
+                    },
+                    {
+                      "name": "total_obligations",
+                      "expression": "`total_obligations`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "State-Quarter Obligations Heatmap",
+                "showTitle": true
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "state"
+                  },
+                  {
+                    "fieldName": "quarter"
+                  },
+                  {
+                    "fieldName": "total_obligations",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "compact"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 27,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "volume_vs_value",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "state",
+                      "expression": "`state`"
+                    },
+                    {
+                      "name": "sum(transaction_count)",
+                      "expression": "SUM(`transaction_count`)"
+                    },
+                    {
+                      "name": "sum(total_obligations)",
+                      "expression": "SUM(`total_obligations`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Transaction Volume vs Value",
+                "showTitle": true
+              },
+              "widgetType": "scatter",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(transaction_count)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(total_obligations)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "state",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 33,
             "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "period_comparison",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    },
+                    {
+                      "name": "sum(total_obligations)",
+                      "expression": "SUM(`total_obligations`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Period-to-Period Comparison",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(total_obligations)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 33,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "trend_forecast",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52f8d5c8",
+                  "fields": [
+                    {
+                      "name": "state",
+                      "expression": "`state`"
+                    },
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    },
+                    {
+                      "name": "sum(total_obligations)",
+                      "expression": "SUM(`total_obligations`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Spending Trend Over Time",
+                "showTitle": true
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(total_obligations)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "state",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 39,
+            "width": 12,
             "height": 6
           }
         }
